@@ -13,19 +13,20 @@ library(raster)
 library(foreign)
 library(rgdal)
 library(sp)
+library(dplyr)
+library(readr)
 
 ######################################################################
 ### LANDFIRE DATASET
 ######################################################################
 # set directories
-landfire_dir <- 'data/lf88747118_US_200EVT'
-raster_dir <- paste0(landfire_dir, '/adf')
-
+landfire_dir <- 'data/adf'
 # read in value decoder
-lf_ref <- read.dbf(paste0(landfire_dir, '/', 'US_200EVT\\US_200EVT.dbf'))
-
+lf_ref <- read.dbf(paste0(landfire_dir, '/', 'US_200EVT_US_200EVT.dbf'))
+# LANDFIRE database
+raster_name <- 'w001000.adf'
 # read in raster layers
-lf <- raster(paste(landfire_dir, 'adf', 'w001000.adf', sep = '/'))
+lf <- raster(paste(landfire_dir, raster_name, sep = '/'))
 # get projection
 new_proj <- proj4string(lf)
 # convert to sp object
@@ -47,5 +48,12 @@ ca_fires_proj <- sp::spTransform(ca_fires_sp, new_proj)
 # JOIN AND SAVE OUTPUT
 ######################################################################
 ### get raster values for points
-lf_points <- sp::over(ca_fires_sp, lf_spdf)
+lf_points <- sp::over(ca_fires_proj, lf_spdf)
+colnames(lf_points) <- 'VALUE'
+# join to reference table
+lf_data <- lf_points %>% 
+  dplyr::left_join(ref_df, by = 'VALUE')
 
+ca_lf_data <- cbind(ca_fires, lf_data)
+
+write_csv(ca_lf_data, 'data/ca_fires_lf.csv')
