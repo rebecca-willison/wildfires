@@ -5,3 +5,5 @@
 data/
 .Rproj
 .DS_Store
+.ipynb_checkpoints/
+data prep/.ipynb_checkpoints/
