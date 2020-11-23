@@ -4,7 +4,8 @@
 #  Script to do some exploratory analysis
 #
 ######################################################################
-
+library(reticulate)
+source_python('data prep/src/monthly_weather_aggregate.py')
 # data wrangling
 library(dplyr)
 library(readr)
@@ -23,7 +24,10 @@ library(raster)
 library(maptools)
 
 ### load dataset for modeling
-fires <- read_csv('data/ca_modeling_dataset.csv') %>% data.frame
+fires <- read_csv('data/ca_modeling_dataset.csv') %>% 
+  data.frame %>% 
+  dplyr::mutate(date = as.Date(DISCOVERY_DOY, origin = paste0(FIRE_YEAR, '-01-01')),
+                month = format(date, '%m'))
 
 ### get county polygons for mapping
 counties <- st_as_sf(maps::map("county", plot = FALSE, fill = TRUE))
@@ -73,105 +77,47 @@ for(l in 1:length(layers_list)){
 }
 write.csv(results, 'results/IPPP_byYear_byClass.csv', row.names = F)
 
-### review results
-res_plot <- results %>% 
-  tidyr::separate(variable, into = c('group', 'variable_name'), 
-                  sep = '\\.', remove = F) %>% 
-  dplyr::mutate(feature_year = ifelse(group == 'CDLFeatures',
-                                      stringr::str_remove_all(variable_name, '[a-z_]'),
-                                      NA),
-                pValue = round(pValue, 4)) %>% 
-  dplyr::filter((group == 'CDLFeatures' & year == feature_year) | group != 'CDLFeatures')
+### precipitation exploratory analysis
+### define analyses
+year_months <- fires %>% 
+  dplyr::select(FIRE_YEAR, month) %>% 
+  dplyr::rename(year = FIRE_YEAR) %>% 
+  dplyr::mutate(month = as.numeric(month)) %>% 
+  dplyr::group_by(year, month) %>% 
+  dplyr::summarise(N = n()) %>% 
+  dplyr::filter(N >= 5)
 
-### cropland
-ggplot(res_plot %>% dplyr::filter(group == 'CDLFeatures'), 
-       aes(size, pValue, fill = size)) +
-  geom_boxplot() +
-  theme_bw(base_size = 15) +
-  guides(fill = F) +
-  labs(x = 'Fire Size Class', title = 'Cropland Data Layer')
+month_lags <- 0:23
 
-ggplot(res_plot %>% dplyr::filter(group == 'CDLFeatures'),
-       aes(size, year, fill = pValue)) +
-  geom_tile() +
-  theme_bw(base_size = 15) +
-  scale_fill_viridis_c(direction = -1)
+datasets <- merge(year_months, month_lags) %>% 
+  dplyr::rename(lag = y) %>% 
+  dplyr::select(-N)
 
-ggplot(res_plot %>% dplyr::filter(group == 'CDLFeatures'),
-       aes(year, pValue, group = size, color = size)) +
-  geom_line(alpha = .5, size = 2) +
-  theme_bw(base_size = 15) +
-  facet_grid( . ~ size) +
-  theme(axis.text.x = element_text(angle = 90))
-
-### population density
-popdens <- results %>% 
-  tidyr::separate(variable, into = c('group', 'variable_name'), 
-                  sep = '\\.', remove = F) %>% 
-  dplyr::mutate(pValue = round(pValue, 4)) %>% 
-  dplyr::filter(group == 'PopDensFeatures') %>% 
-  dplyr::mutate(feature_year = gsub('gpw_v4_population_density_rev11_', '',
-                                    gsub('_30_sec_population_density', '', variable_name))) %>%
-  dplyr::filter(abs(year - as.numeric(feature_year)) < 3)
-
-ggplot(popdens, aes(year, pValue, group = size, color = size)) +
-  geom_line(alpha = .75, size = 2) +
-  theme_bw(base_size = 15) +
-  ylim(0, 1)
+### fit models
+results <- NULL
+for(i in 1:nrow(datasets)){
+  get_monthly_precip(datasets[i, 'year'], datasets[i, 'month'] - datasets[i, 'lag'])
+  layer_raster <- raster::raster('data/pr/test.pr.tif')
+  layer_image <- as.im.RasterLayer(layer_raster)
+  df <- fires %>% 
+    dplyr::filter(FIRE_YEAR == datasets[i, 'year'],
+                  month == datasets[i, 'month'])
+  df_pp <- ppp(df$LONGITUDE, df$LATITUDE, window = cal_window)
+  mod.0 <- ppm(df_pp ~ 1)
+  mod.1 <- ppm(df_pp ~ cov, covariates = list(cov = layer_image))
+  modsum <- summary(mod.1)
+  lrt <- anova(mod.0, mod.1, test = 'LRT')
+  result <- data.frame(lag = datasets[i, 'lag'],
+                       year = datasets[i, 'year'],
+                       month = datasets[i, 'month'],
+                       deviance = lrt$Deviance[2],
+                       lrt.pValue = lrt$`Pr(>Chi)`[2],
+                       wald.pValue = 2*pnorm(-abs(modsum$coefs.SE.CI$Zval[2])))
+  results <- rbind(results, result)
+  file.remove('data/pr/test.pr.tif')
+}
+write.csv(results, 'results/IPPP_byMonthYear_Precip.csv', row.names = F)
 
 
-### static features
-static <- results %>% 
-  tidyr::separate(variable, into = c('group', 'variable_name'), 
-                  sep = '\\.', remove = F) %>% 
-  dplyr::mutate(pValue = round(pValue, 4)) %>% 
-  dplyr::filter(group == 'Static') 
- 
-ggplot(static, aes(year, pValue, group = size, color = size)) +
-  geom_hline(yintercept = .05) +
-  geom_line(alpha = .8, size = 1.5) +
-  theme_bw(base_size = 15) +
-  ylim(0, 1) +
-  facet_grid(variable_name ~ size) +
-  theme(axis.text.x = element_text(angle = 90))
-
-
-### landfire
-landfire <- results %>% 
-  tidyr::separate(variable, into = c('group', 'variable_name'), 
-                  sep = '\\.', remove = F) %>% 
-  dplyr::mutate(pValue = round(pValue, 4)) %>% 
-  dplyr::filter(group == 'LANDFIREFeatures') %>% 
-  dplyr::mutate(variable_name = gsub('CONUS_', '', variable_name))
-
-ggplot(landfire, aes(year, pValue, group = size, color = size)) +
-  geom_hline(yintercept = .05) +
-  geom_line(alpha = .8, size = 1.5) +
-  theme_bw(base_size = 15) +
-  ylim(0, 1) +
-  facet_grid(variable_name ~ size) +
-  theme(axis.text.x = element_text(angle = 90))
-
-
-### investigate duplicates
-
-### exploratory plots
-# counties <- st_as_sf(maps::map("county", plot = FALSE, fill = TRUE))
-# counties <- subset(counties, grepl("california", counties$ID))
-# 
-# ggplot() +
-#   geom_sf() +
-#   geom_sf(data = counties, fill = 'black', color = gray(.5)) +
-#   geom_point(data = fire_sub, 
-#              aes(x = LONGITUDE, y = LATITUDE, color = FIRE_YEAR), 
-#              alpha = .5) +
-#   scale_color_viridis(option = 'plasma') +
-#   theme_void(base_size = 1) +
-#   guides(color = FALSE) #+
-#   #facet_wrap(~FIRE_YEAR)
-# 
-# 
-# fit <- lgcp.estK(fires.pp, covmodel=list(model='matern', nu=0.5))
-# plot(fit)
 
 
