@@ -20,7 +20,7 @@ def get_monthly_precip(year, month):
             .filterDate(date_start, date_end)\
             .filterBounds(ca_geom)\
             .sum()\
-            .mask(ca_geom)
+            .clip(ca_geom)
   # export raster
   geemap.ee_export_image(image, 'data/pr/test.tif', region = ca_geom, file_per_band = True, scale = 1000)
 

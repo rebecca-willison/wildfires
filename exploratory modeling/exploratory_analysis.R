@@ -10,6 +10,7 @@ source_python('data prep/src/monthly_weather_aggregate.py')
 library(dplyr)
 library(readr)
 library(tidyr)
+library(lubridate)
 # for plotting
 library(ggplot2)
 library(viridis)
@@ -82,21 +83,24 @@ write.csv(results, 'results/IPPP_byYear_byClass.csv', row.names = F)
 year_months <- fires %>% 
   dplyr::select(FIRE_YEAR, month) %>% 
   dplyr::rename(year = FIRE_YEAR) %>% 
-  dplyr::mutate(month = as.numeric(month)) %>% 
-  dplyr::group_by(year, month) %>% 
+  dplyr::mutate(Month = as.numeric(month)) %>% 
+  dplyr::group_by(year, Month, month) %>% 
   dplyr::summarise(N = n()) %>% 
-  dplyr::filter(N >= 5)
+  dplyr::filter(N >= 5) %>% 
+  dplyr::mutate(date = as.Date(paste(year, Month, '01', sep = '-')))
 
 month_lags <- 0:23
 
 datasets <- merge(year_months, month_lags) %>% 
   dplyr::rename(lag = y) %>% 
-  dplyr::select(-N)
+  dplyr::mutate(covDate = date %m-% months(lag),
+                covYear = as.numeric(format(covDate, '%Y')),
+                covMonth = as.numeric(format(covDate, '%m')))
 
 ### fit models
 results <- NULL
 for(i in 1:nrow(datasets)){
-  get_monthly_precip(datasets[i, 'year'], datasets[i, 'month'] - datasets[i, 'lag'])
+  get_monthly_precip(datasets[i, 'covYear'], datasets[i, 'covMonth'])
   layer_raster <- raster::raster('data/pr/test.pr.tif')
   layer_image <- as.im.RasterLayer(layer_raster)
   df <- fires %>% 
@@ -115,9 +119,8 @@ for(i in 1:nrow(datasets)){
                        wald.pValue = 2*pnorm(-abs(modsum$coefs.SE.CI$Zval[2])))
   results <- rbind(results, result)
   file.remove('data/pr/test.pr.tif')
+  message(paste0(round(i/nrow(datasets), 2)*100, '% done'))
 }
-write.csv(results, 'results/IPPP_byMonthYear_Precip.csv', row.names = F)
-
-
+write.csv(results, 'results/IPPP_byMonthYear_PRCP.csv', row.names = F)
 
 
