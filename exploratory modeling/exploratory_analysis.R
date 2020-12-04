@@ -123,4 +123,52 @@ for(i in 1:nrow(datasets)){
 }
 write.csv(results, 'results/IPPP_byMonthYear_PRCP.csv', row.names = F)
 
+######################################################################
+# 12-month cumulative precip
+######################################################################
+
+### precipitation exploratory analysis
+### define analyses
+year_months <- fires %>% 
+  dplyr::select(FIRE_YEAR, month) %>% 
+  dplyr::rename(year = FIRE_YEAR) %>% 
+  dplyr::mutate(Month = as.numeric(month)) %>% 
+  dplyr::group_by(year, Month, month) %>% 
+  dplyr::summarise(N = n()) %>% 
+  dplyr::filter(N >= 5) %>% 
+  dplyr::mutate(date = as.Date(paste(year, Month, '01', sep = '-')))
+
+month_lags <- 12
+
+datasets <- merge(year_months, month_lags) %>% 
+  dplyr::rename(lag = y) %>% 
+  dplyr::mutate(covDate = date %m-% months(lag),
+                covYear = as.numeric(format(covDate, '%Y')),
+                covMonth = as.numeric(format(covDate, '%m')))
+
+### fit models
+results <- NULL
+for(i in 1:nrow(datasets)){
+  get_prev12m_precip(datasets[i, 'covYear'], datasets[i, 'covMonth'])
+  layer_raster <- raster::raster('data/pr/test.pr.tif')
+  layer_image <- as.im.RasterLayer(layer_raster)
+  df <- fires %>% 
+    dplyr::filter(FIRE_YEAR == datasets[i, 'year'],
+                  month == datasets[i, 'month'])
+  df_pp <- ppp(df$LONGITUDE, df$LATITUDE, window = cal_window)
+  mod.0 <- ppm(df_pp ~ 1)
+  mod.1 <- ppm(df_pp ~ cov, covariates = list(cov = layer_image))
+  modsum <- summary(mod.1)
+  lrt <- anova(mod.0, mod.1, test = 'LRT')
+  result <- data.frame(lag = datasets[i, 'lag'],
+                       year = datasets[i, 'year'],
+                       month = datasets[i, 'month'],
+                       deviance = lrt$Deviance[2],
+                       lrt.pValue = lrt$`Pr(>Chi)`[2],
+                       wald.pValue = 2*pnorm(-abs(modsum$coefs.SE.CI$Zval[2])))
+  results <- rbind(results, result)
+  file.remove('data/pr/test.pr.tif')
+  message(paste0(round(i/nrow(datasets), 2)*100, '% done'))
+}
+write.csv(results, 'results/IPPP_byMonthYear_PRCP_12m.csv', row.names = F)
 
