@@ -220,7 +220,7 @@ for(i in 1:nrow(datasets)){
                        lrt.pValue = lrt$`Pr(>Chi)`[2],
                        wald.pValue = 2*pnorm(-abs(modsum$coefs.SE.CI$Zval[2])))
   results <- rbind(results, result)
-  file.remove('data/pr/test.pr.tif')
+  file.remove('data/pr/test.bi.tif')
   message(paste0(round(i/nrow(datasets), 2)*100, '% done'))
 }
 write.csv(results, 'results/IPPP_byMonthYear_BI.csv', row.names = F)
