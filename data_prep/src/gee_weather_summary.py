@@ -44,5 +44,5 @@ def get_weather_summary_raster(year, month, day, time_unit, num_time_units,
     return
 
 
-
+#features_df=pd.DataFrame([pd.DataFrame(features[_]).properties.T for _ in range(len(features))])
 
