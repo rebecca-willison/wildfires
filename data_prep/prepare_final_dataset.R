@@ -83,7 +83,7 @@ calfire_new <- st_drop_geometry(calfire) %>%
   dplyr::bind_rows(st_drop_geometry(new))
 
 ### save
-write.csv(calfire_new, 'CalFires.csv', row.names = F)
+write.csv(calfire_new, 'data/CalFires.csv', row.names = F)
 
 
 
