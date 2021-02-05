@@ -62,7 +62,7 @@ layers_list <- lapply(layers_files, function(x){
 results <- NULL
 years <- unique(fires$FIRE_YEAR)
 classes <- unique(fires$FIRE_SIZE_CLASS)
-for(l in 1:length(layers_list)){
+for(l in 31:length(layers_list)){
   for(y in 1:length(years)){
     for(c in 1:length(classes)){
       df <- fires %>%
